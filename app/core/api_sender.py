@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import urllib3
+
 import requests
 from dotenv import load_dotenv
 
@@ -35,6 +37,13 @@ _log = logging.getLogger("api_sender")
 
 _TIMEOUT = 30  # seconds
 
+# SSL verification — set WEBEX_SSL_VERIFY=false in .env to disable (corporate proxy)
+_ssl_verify_raw = os.getenv("WEBEX_SSL_VERIFY", "true").strip().lower()
+_SSL_VERIFY: bool = _ssl_verify_raw not in ("false", "0", "no")
+if not _SSL_VERIFY:
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    _log.warning("SSL verification DISABLED (WEBEX_SSL_VERIFY=false). Use only in trusted networks.")
+
 
 class APISender:
     """Handles HTTP requests to the Webex Connect messaging API."""
@@ -44,6 +53,7 @@ class APISender:
         self._base_url: str = os.getenv(
             "WEBEX_BASE_URL", "https://api.imiconnect.io"
         ).rstrip("/")
+        self._ssl_verify: bool = _SSL_VERIFY
 
     # ------------------------------------------------------------------
     # Public interface
@@ -79,6 +89,7 @@ class APISender:
                 json=payload,
                 headers=headers,
                 timeout=_TIMEOUT,
+                verify=self._ssl_verify,
             )
 
             _log.debug("=== RESPONSE ===")
@@ -151,6 +162,7 @@ class APISender:
                 json=payload,
                 headers=headers,
                 timeout=_TIMEOUT,
+                verify=self._ssl_verify,
             )
 
             if resp.status_code == 200:
