@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec.bak
+
+# Secrets — NEVER commit
+.env
+
+# Log files
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
