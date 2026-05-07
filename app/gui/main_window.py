@@ -243,12 +243,16 @@ class MainWindow(ctk.CTk):
         # SMS vars
         self.sms_from_var = tk.StringVar()
         self.sms_type_var = tk.StringVar(value="text")
+        self.sms_smartlink_id_var = tk.StringVar()
+        self.sms_smartlink_validity_var = tk.StringVar(value="1")
 
         # MMS vars
         self.mms_from_var = tk.StringVar()
         self.mms_subject_var = tk.StringVar()
         self.mms_media_url_var = tk.StringVar()
         self.mms_caption_var = tk.StringVar()
+        self.mms_smartlink_id_var = tk.StringVar()
+        self.mms_smartlink_validity_var = tk.StringVar(value="1")
 
         # RCS vars
         self.rcs_from_var = tk.StringVar()
@@ -535,6 +539,9 @@ class MainWindow(ctk.CTk):
         DragChip.register_drop_target(parent, self.sms_text._textbox)  # type: ignore[attr-defined]
 
         _make_hint(parent, "Use {{CAMPO}} para personalizar (ex: Olá {{NOME}}, seu código é {{CODIGO}})", row=5)
+        _make_hint(parent, "Para inserir um smartlink rastreável, use {{smartlink}} no texto acima.", row=6)
+
+        self._make_smartlink_fields(parent, self.sms_smartlink_id_var, self.sms_smartlink_validity_var, row_start=7)
 
     def _build_mms_tab(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=1)
@@ -561,15 +568,18 @@ class MainWindow(ctk.CTk):
         DragChip.register_drop_target(parent, self.mms_text._textbox)  # type: ignore[attr-defined]
 
         _make_hint(parent, "Use {{CAMPO}} para personalizar", row=6)
+        _make_hint(parent, "Para inserir um smartlink rastreável, use {{smartlink}} no texto acima.", row=7)
 
-        self._make_media_url_input(parent, self.mms_media_url_var, "URL da Imagem / Mídia *", row_start=7)
-        # helper uses rows 7, 8, 9
+        self._make_media_url_input(parent, self.mms_media_url_var, "URL da Imagem / Mídia *", row_start=8)
+        # helper uses rows 8, 9, 10
 
-        _make_label(parent, "Legenda da imagem", row=10)
+        _make_label(parent, "Legenda da imagem", row=11)
         ctk.CTkEntry(
             parent, textvariable=self.mms_caption_var,
             placeholder_text="Descrição / alt-text da imagem", height=36,
-        ).grid(row=11, column=0, sticky="ew", padx=12, pady=(0, 12))
+        ).grid(row=12, column=0, sticky="ew", padx=12, pady=(0, 8))
+
+        self._make_smartlink_fields(parent, self.mms_smartlink_id_var, self.mms_smartlink_validity_var, row_start=13)
 
     def _build_rcs_tab(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=1)
@@ -976,6 +986,55 @@ class MainWindow(ctk.CTk):
         """Legacy — kept for compatibility but no longer used in UI."""
         pass
 
+    def _make_smartlink_fields(
+        self,
+        parent: tk.Widget,
+        id_var: tk.StringVar,
+        validity_var: tk.StringVar,
+        row_start: int,
+    ) -> int:
+        """Add Smartlink ID + Validity fields. Returns next available row."""
+        # Separator label
+        sep = ctk.CTkFrame(parent, fg_color="#1e3a5f", height=1)
+        sep.grid(row=row_start, column=0, sticky="ew", padx=12, pady=(8, 4))
+
+        _make_label(parent, "Smartlink (opcional)", row=row_start + 1)
+
+        hint = ctk.CTkLabel(
+            parent,
+            text="Use {{smartlink}} no texto — será substituído pelo link rastreável.\nO ID é o número do smartlink configurado na plataforma.",
+            font=ctk.CTkFont(size=10),
+            text_color="gray",
+            anchor="w",
+            justify="left",
+        )
+        hint.grid(row=row_start + 2, column=0, sticky="w", padx=12, pady=(0, 4))
+
+        # ID + Validity side-by-side
+        row_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        row_frame.grid(row=row_start + 3, column=0, sticky="ew", padx=12, pady=(0, 10))
+        row_frame.grid_columnconfigure(0, weight=3)
+        row_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkEntry(
+            row_frame,
+            textvariable=id_var,
+            placeholder_text="ID do Smartlink  ex: 4371",
+            height=36,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        ctk.CTkEntry(
+            row_frame,
+            textvariable=validity_var,
+            placeholder_text="Validade (dias)",
+            height=36,
+            width=110,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=0, column=1, sticky="ew")
+
+        return row_start + 4
+
     def _make_media_url_input(
         self,
         parent: tk.Widget,
@@ -1130,22 +1189,38 @@ class MainWindow(ctk.CTk):
         campaign = self.campaign_var.get().strip()
 
         if channel == "sms":
+            sl_id = self.sms_smartlink_id_var.get().strip()
+            sl_validity_raw = self.sms_smartlink_validity_var.get().strip()
+            raw_text = self._get_textbox(self.sms_text)
+            if sl_id:
+                raw_text = raw_text.replace("{{smartlink}}", f"{{{{smartlink_{sl_id}}}}}").replace("{{SMARTLINK}}", f"{{{{smartlink_{sl_id}}}}}")
+            sms_text = self._apply_subs(raw_text, row)
             p: Dict[str, Any] = {
                 "channel": "sms",
                 "from": self.sms_from_var.get().strip(),
                 "to": [{"msisdn": [msisdn]}],
                 "content": {
                     "type": self.sms_type_var.get(),
-                    "text": self._apply_subs(self._get_textbox(self.sms_text), row),
+                    "text": sms_text,
                 },
             }
             if campaign:
                 p["correlationId"] = campaign
+            if sl_id:
+                try:
+                    sl_validity = int(sl_validity_raw) if sl_validity_raw else 1
+                except ValueError:
+                    sl_validity = 1
+                p["smartlinks"] = [{"smartlinkId": int(sl_id), "validity": sl_validity}]
             return p
 
         if channel == "mms":
-            text = self._apply_subs(self._get_textbox(self.mms_text), row)
-            campaign = self.campaign_var.get().strip()
+            sl_id = self.mms_smartlink_id_var.get().strip()
+            sl_validity_raw = self.mms_smartlink_validity_var.get().strip()
+            raw_text = self._get_textbox(self.mms_text)
+            if sl_id:
+                raw_text = raw_text.replace("{{smartlink}}", f"{{{{smartlink_{sl_id}}}}}").replace("{{SMARTLINK}}", f"{{{{smartlink_{sl_id}}}}}")
+            text = self._apply_subs(raw_text, row)
             payload: Dict[str, Any] = {
                 "channel": "mms",
                 "from": self.mms_from_var.get().strip(),
@@ -1158,6 +1233,12 @@ class MainWindow(ctk.CTk):
             }
             if campaign:
                 payload["correlationId"] = campaign
+            if sl_id:
+                try:
+                    sl_validity = int(sl_validity_raw) if sl_validity_raw else 1
+                except ValueError:
+                    sl_validity = 1
+                payload["smartlinks"] = [{"smartlinkId": int(sl_id), "validity": sl_validity}]
             media_url = self.mms_media_url_var.get().strip()
             attachments: List[Dict[str, Any]] = []
             if media_url:
