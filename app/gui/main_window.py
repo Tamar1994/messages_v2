@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -237,6 +238,7 @@ class MainWindow(ctk.CTk):
         # ── tkinter vars ─────────────────────────────────────
         self.file_info_var = tk.StringVar(value="Nenhum arquivo selecionado")
         self.msisdn_field_var = tk.StringVar()
+        self.campaign_var = tk.StringVar()
 
         # SMS vars
         self.sms_from_var = tk.StringVar()
@@ -405,8 +407,28 @@ class MainWindow(ctk.CTk):
         # Register as drop target
         DragChip.register_drop_target(recip, msisdn_entry._entry)  # type: ignore[attr-defined]
 
+        # ── Campaign name ─────────────────────────────────────
+        camp = self._section(parent, "Nome da Campanha", row=1)
+        camp.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            camp,
+            text="Identificador da campanha (enviado como correlationId na API):",
+            font=ctk.CTkFont(size=11),
+            text_color="gray",
+            anchor="w",
+        ).grid(row=1, column=0, sticky="w", padx=12, pady=(2, 4))
+
+        ctk.CTkEntry(
+            camp,
+            textvariable=self.campaign_var,
+            placeholder_text="ex: Black Friday 2026",
+            height=36,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
+
         # ── Channel tabs ──────────────────────────────────────
-        tabs_frame = self._section(parent, "Canal de Envio", row=1)
+        tabs_frame = self._section(parent, "Canal de Envio", row=2)
         tabs_frame.grid_columnconfigure(0, weight=1)
 
         self.tab_view = ctk.CTkTabview(tabs_frame, height=420)
@@ -1052,9 +1074,14 @@ class MainWindow(ctk.CTk):
         return tab.lower()  # "sms", "mms" or "rcs"
 
     def _apply_subs(self, text: str, row: Dict[str, str]) -> str:
-        """Replace {{FIELD}} tokens with row values."""
+        """Replace {{FIELD}} tokens with row values (case-insensitive match)."""
         for key, value in row.items():
-            text = text.replace(f"{{{{{key}}}}}", str(value))
+            text = re.sub(
+                re.escape(f"{{{{{key}}}}}"),
+                lambda v=str(value): v,
+                text,
+                flags=re.IGNORECASE,
+            )
         return text
 
     def _build_suggestions_payload(self, sug_list: List[Dict], row: Dict[str, str]) -> List[Dict[str, Any]]:
@@ -1100,8 +1127,10 @@ class MainWindow(ctk.CTk):
         msisdn_field = self.msisdn_field_var.get().strip()
         msisdn = str(row.get(msisdn_field, "")).strip()
 
+        campaign = self.campaign_var.get().strip()
+
         if channel == "sms":
-            return {
+            p: Dict[str, Any] = {
                 "channel": "sms",
                 "from": self.sms_from_var.get().strip(),
                 "to": [{"msisdn": [msisdn]}],
@@ -1110,9 +1139,13 @@ class MainWindow(ctk.CTk):
                     "text": self._apply_subs(self._get_textbox(self.sms_text), row),
                 },
             }
+            if campaign:
+                p["correlationId"] = campaign
+            return p
 
         if channel == "mms":
             text = self._apply_subs(self._get_textbox(self.mms_text), row)
+            campaign = self.campaign_var.get().strip()
             payload: Dict[str, Any] = {
                 "channel": "mms",
                 "from": self.mms_from_var.get().strip(),
@@ -1123,12 +1156,16 @@ class MainWindow(ctk.CTk):
                     "name": "Message",
                 },
             }
+            if campaign:
+                payload["correlationId"] = campaign
             media_url = self.mms_media_url_var.get().strip()
+            attachments: List[Dict[str, Any]] = []
             if media_url:
-                caption = self._apply_subs(self.mms_caption_var.get().strip(), row) or "Image"
-                payload["content"]["attachments"] = [
-                    {"type": "image", "messageText": caption, "mediaUrl": media_url, "duration": 5}
-                ]
+                attachments.append({"type": "image", "messageText": text, "mediaUrl": media_url, "duration": 5})
+            elif text:
+                attachments.append({"type": "text", "messageText": text})
+            if attachments:
+                payload["content"]["attachments"] = attachments
             return payload
 
         # rcs
@@ -1146,6 +1183,8 @@ class MainWindow(ctk.CTk):
             "from": self.rcs_from_var.get().strip(),
             "to": [{"msisdn": [msisdn]}],
         }
+        if campaign:
+            base["correlationId"] = campaign
         if options:
             base["options"] = options
 
